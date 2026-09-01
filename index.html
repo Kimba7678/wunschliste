@@ -60,8 +60,8 @@
     margin: 0;
     font-style: italic;
   }
+  .actions { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0; }
   button {
-    flex-shrink: 0;
     font-family: inherit;
     font-size: 14px;
     padding: 9px 16px;
@@ -71,7 +71,6 @@
     color: var(--accent);
     cursor: pointer;
     transition: background 0.15s ease, color 0.15s ease;
-    align-self: center;
   }
   button:hover:not(:disabled) { background: var(--accent); color: #16141a; }
   button:disabled {
@@ -85,7 +84,6 @@
     font-size: 12px;
     color: var(--ink-dim);
     text-decoration: underline;
-    align-self: center;
     white-space: nowrap;
   }
   a.undo:hover { color: var(--accent); }
@@ -105,7 +103,22 @@
   <p class="foot">Jedes Geschenk kann nur einmal reserviert werden.</p>
 </div>
 
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 <script>
+const firebaseConfig = {
+  apiKey: "AIzaSyB0HynRXBTR8ei8t_7fw6w6z7TjZYpxspU",
+  authDomain: "wunschliste-6873e.firebaseapp.com",
+  databaseURL: "https://wunschliste-6873e-default-rtdb.firebaseio.com",
+  projectId: "wunschliste-6873e",
+  storageBucket: "wunschliste-6873e.firebasestorage.app",
+  messagingSenderId: "1007973909587",
+  appId: "1:1007973909587:web:2e71cd459152ff498fb2a6"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+const reservationsRef = db.ref("reservations");
+
 const items = [
   { id: "item1", name: "This Place Will Become Your Tomb – Blue/Green Marbled Vinyl (Sleep Token LP)", price: "36,99 €", url: "https://vinyl-galore.de/produkt/this-place-will-become-your-tomb-blue-green-marbled-vinyl-sleep-token-lp/" },
   { id: "item2", name: "Sundowning – Clear Vinyl (Sleep Token LP)", price: "36,99 €", url: "https://vinyl-galore.de/produkt/sundowning-clear-vinyl-sleep-token-lp/" },
@@ -114,10 +127,10 @@ const items = [
   { id: "item5", name: "UGREEN FineTrack Duo GPS Tracker – 4er Pack", price: "28,49 €", url: "https://www.amazon.de/dp/B0FRLWSGPW" }
 ];
 
-const STORAGE_KEY = "wishlist:reservations";
 const listEl = document.getElementById("list");
 
 function render(reserved) {
+  reserved = reserved || {};
   listEl.innerHTML = "";
   items.forEach(item => {
     const li = document.createElement("li");
@@ -127,64 +140,42 @@ function render(reserved) {
         <p class="name"><a href="${item.url}" target="_blank" rel="noopener">${item.name}</a></p>
         <p class="note">${item.price}</p>
       </div>
-      <button data-id="${item.id}" ${isTaken ? "disabled" : ""}>${isTaken ? "Vergeben" : "Ich nehme das"}</button>
-      ${isTaken ? `<a href="#" class="undo" data-id="${item.id}">rückgängig</a>` : ""}
+      <div class="actions">
+        <button data-id="${item.id}" ${isTaken ? "disabled" : ""}>${isTaken ? "Vergeben" : "Ich nehme das"}</button>
+        ${isTaken ? `<a href="#" class="undo" data-id="${item.id}">rückgängig</a>` : ""}
+      </div>
     `;
     listEl.appendChild(li);
   });
 
-  listEl.querySelectorAll("a.undo").forEach(a => {
-    a.addEventListener("click", async (e) => {
-      e.preventDefault();
-      try {
-        const current = await window.storage.get(STORAGE_KEY, true).catch(() => null);
-        const data = current ? JSON.parse(current.value) : {};
-        delete data[a.dataset.id];
-        await window.storage.set(STORAGE_KEY, JSON.stringify(data), true);
-        render(data);
-      } catch (err) {
-        alert("Rückgängig machen hat nicht geklappt, bitte nochmal versuchen.");
-      }
-    });
-  });
-
   listEl.querySelectorAll("button:not(:disabled)").forEach(btn => {
-    btn.addEventListener("click", async () => {
+    btn.addEventListener("click", () => {
       btn.disabled = true;
       btn.classList.add("loading");
       btn.textContent = "Moment...";
-      try {
-        const current = await window.storage.get(STORAGE_KEY, true).catch(() => null);
-        const data = current ? JSON.parse(current.value) : {};
-        if (data[btn.dataset.id]) {
-          // someone else grabbed it in the meantime
-          render(data);
-          return;
-        }
-        data[btn.dataset.id] = true;
-        await window.storage.set(STORAGE_KEY, JSON.stringify(data), true);
-        render(data);
-      } catch (e) {
+      reservationsRef.child(btn.dataset.id).transaction(current => {
+        if (current) return; // schon vergeben, abbrechen
+        return true;
+      }).catch(() => {
         btn.classList.remove("loading");
         btn.disabled = false;
         btn.textContent = "Ich nehme das";
         alert("Da ist etwas schiefgelaufen, bitte nochmal versuchen.");
-      }
+      });
+    });
+  });
+
+  listEl.querySelectorAll("a.undo").forEach(a => {
+    a.addEventListener("click", (e) => {
+      e.preventDefault();
+      reservationsRef.child(a.dataset.id).remove();
     });
   });
 }
 
-async function init() {
-  try {
-    const result = await window.storage.get(STORAGE_KEY, true).catch(() => null);
-    const reserved = result ? JSON.parse(result.value) : {};
-    render(reserved);
-  } catch (e) {
-    render({});
-  }
-}
-
-init();
+reservationsRef.on("value", snapshot => {
+  render(snapshot.val());
+});
 </script>
 </body>
 </html>
