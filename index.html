@@ -81,18 +81,19 @@
     background: transparent;
   }
   button.loading { opacity: 0.5; cursor: wait; }
+  a.undo {
+    font-size: 12px;
+    color: var(--ink-dim);
+    text-decoration: underline;
+    align-self: center;
+    white-space: nowrap;
+  }
+  a.undo:hover { color: var(--accent); }
   .foot {
     margin-top: 40px;
     font-size: 13px;
     color: var(--ink-dim);
     text-align: center;
-  }
-  .error {
-    color: #c96a4f;
-    font-size: 13px;
-    text-align: center;
-    margin-top: 20px;
-    display: none;
   }
 </style>
 </head>
@@ -102,29 +103,9 @@
   <p class="sub">Auf „Ich nehme das" klicken reserviert das Geschenk für dich – es verschwindet dann für alle anderen. Wer was genommen hat, wird nicht angezeigt.</p>
   <ul id="list"></ul>
   <p class="foot">Jedes Geschenk kann nur einmal reserviert werden.</p>
-  <p class="error" id="error">Verbindung zur Datenbank fehlgeschlagen. Bitte Seite neu laden.</p>
 </div>
 
-<!-- Firebase SDK (compat-Version, funktioniert direkt per <script>-Tag ohne npm) -->
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
-
 <script>
-const firebaseConfig = {
-  apiKey: "AIzaSyB0HynRXBTR8ei8t_7fw6w6z7TjZYpxspU",
-  authDomain: "wunschliste-6873e.firebaseapp.com",
-  databaseURL: "https://wunschliste-6873e-default-rtdb.firebaseio.com",
-  projectId: "wunschliste-6873e",
-  storageBucket: "wunschliste-6873e.firebasestorage.app",
-  messagingSenderId: "1007973909587",
-  appId: "1:1007973909587:web:2e71cd459152ff498fb2a6",
-  measurementId: "G-1KMLVR75BD"
-};
-
-firebase.initializeApp(firebaseConfig);
-const db = firebase.database();
-const reservationsRef = db.ref("reservations");
-
 const items = [
   { id: "item1", name: "This Place Will Become Your Tomb – Blue/Green Marbled Vinyl (Sleep Token LP)", price: "36,99 €", url: "https://vinyl-galore.de/produkt/this-place-will-become-your-tomb-blue-green-marbled-vinyl-sleep-token-lp/" },
   { id: "item2", name: "Sundowning – Clear Vinyl (Sleep Token LP)", price: "36,99 €", url: "https://vinyl-galore.de/produkt/sundowning-clear-vinyl-sleep-token-lp/" },
@@ -133,8 +114,8 @@ const items = [
   { id: "item5", name: "UGREEN FineTrack Duo GPS Tracker – 4er Pack", price: "28,49 €", url: "https://www.amazon.de/dp/B0FRLWSGPW" }
 ];
 
+const STORAGE_KEY = "wishlist:reservations";
 const listEl = document.getElementById("list");
-const errorEl = document.getElementById("error");
 
 function render(reserved) {
   listEl.innerHTML = "";
@@ -147,8 +128,24 @@ function render(reserved) {
         <p class="note">${item.price}</p>
       </div>
       <button data-id="${item.id}" ${isTaken ? "disabled" : ""}>${isTaken ? "Vergeben" : "Ich nehme das"}</button>
+      ${isTaken ? `<a href="#" class="undo" data-id="${item.id}">rückgängig</a>` : ""}
     `;
     listEl.appendChild(li);
+  });
+
+  listEl.querySelectorAll("a.undo").forEach(a => {
+    a.addEventListener("click", async (e) => {
+      e.preventDefault();
+      try {
+        const current = await window.storage.get(STORAGE_KEY, true).catch(() => null);
+        const data = current ? JSON.parse(current.value) : {};
+        delete data[a.dataset.id];
+        await window.storage.set(STORAGE_KEY, JSON.stringify(data), true);
+        render(data);
+      } catch (err) {
+        alert("Rückgängig machen hat nicht geklappt, bitte nochmal versuchen.");
+      }
+    });
   });
 
   listEl.querySelectorAll("button:not(:disabled)").forEach(btn => {
@@ -157,15 +154,16 @@ function render(reserved) {
       btn.classList.add("loading");
       btn.textContent = "Moment...";
       try {
-        const result = await reservationsRef.child(btn.dataset.id).transaction(current => {
-          if (current) return;
-          return true;
-        });
-        if (!result.committed) {
-          btn.classList.remove("loading");
-          btn.disabled = true;
-          btn.textContent = "Vergeben";
+        const current = await window.storage.get(STORAGE_KEY, true).catch(() => null);
+        const data = current ? JSON.parse(current.value) : {};
+        if (data[btn.dataset.id]) {
+          // someone else grabbed it in the meantime
+          render(data);
+          return;
         }
+        data[btn.dataset.id] = true;
+        await window.storage.set(STORAGE_KEY, JSON.stringify(data), true);
+        render(data);
       } catch (e) {
         btn.classList.remove("loading");
         btn.disabled = false;
@@ -176,13 +174,17 @@ function render(reserved) {
   });
 }
 
-reservationsRef.on("value", snapshot => {
-  const reserved = snapshot.val() || {};
-  render(reserved);
-}, err => {
-  errorEl.style.display = "block";
-  console.error(err);
-});
+async function init() {
+  try {
+    const result = await window.storage.get(STORAGE_KEY, true).catch(() => null);
+    const reserved = result ? JSON.parse(result.value) : {};
+    render(reserved);
+  } catch (e) {
+    render({});
+  }
+}
+
+init();
 </script>
 </body>
 </html>
