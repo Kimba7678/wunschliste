@@ -60,8 +60,8 @@
     margin: 0;
     font-style: italic;
   }
+  .actions { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0; }
   button {
-    flex-shrink: 0;
     font-family: inherit;
     font-size: 14px;
     padding: 9px 16px;
@@ -71,7 +71,6 @@
     color: var(--accent);
     cursor: pointer;
     transition: background 0.15s ease, color 0.15s ease;
-    align-self: center;
   }
   button:hover:not(:disabled) { background: var(--accent); color: #16141a; }
   button:disabled {
@@ -81,18 +80,18 @@
     background: transparent;
   }
   button.loading { opacity: 0.5; cursor: wait; }
+  a.undo {
+    font-size: 12px;
+    color: var(--ink-dim);
+    text-decoration: underline;
+    white-space: nowrap;
+  }
+  a.undo:hover { color: var(--accent); }
   .foot {
     margin-top: 40px;
     font-size: 13px;
     color: var(--ink-dim);
     text-align: center;
-  }
-  .error {
-    color: #c96a4f;
-    font-size: 13px;
-    text-align: center;
-    margin-top: 20px;
-    display: none;
   }
 </style>
 </head>
@@ -102,13 +101,10 @@
   <p class="sub">Auf „Ich nehme das" klicken reserviert das Geschenk für dich – es verschwindet dann für alle anderen. Wer was genommen hat, wird nicht angezeigt.</p>
   <ul id="list"></ul>
   <p class="foot">Jedes Geschenk kann nur einmal reserviert werden.</p>
-  <p class="error" id="error">Verbindung zur Datenbank fehlgeschlagen. Bitte Seite neu laden.</p>
 </div>
 
-<!-- Firebase SDK (compat-Version, funktioniert direkt per <script>-Tag ohne npm) -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
-
 <script>
 const firebaseConfig = {
   apiKey: "AIzaSyB0HynRXBTR8ei8t_7fw6w6z7TjZYpxspU",
@@ -117,10 +113,8 @@ const firebaseConfig = {
   projectId: "wunschliste-6873e",
   storageBucket: "wunschliste-6873e.firebasestorage.app",
   messagingSenderId: "1007973909587",
-  appId: "1:1007973909587:web:2e71cd459152ff498fb2a6",
-  measurementId: "G-1KMLVR75BD"
+  appId: "1:1007973909587:web:2e71cd459152ff498fb2a6"
 };
-
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 const reservationsRef = db.ref("reservations");
@@ -134,9 +128,9 @@ const items = [
 ];
 
 const listEl = document.getElementById("list");
-const errorEl = document.getElementById("error");
 
 function render(reserved) {
+  reserved = reserved || {};
   listEl.innerHTML = "";
   items.forEach(item => {
     const li = document.createElement("li");
@@ -146,42 +140,41 @@ function render(reserved) {
         <p class="name"><a href="${item.url}" target="_blank" rel="noopener">${item.name}</a></p>
         <p class="note">${item.price}</p>
       </div>
-      <button data-id="${item.id}" ${isTaken ? "disabled" : ""}>${isTaken ? "Vergeben" : "Ich nehme das"}</button>
+      <div class="actions">
+        <button data-id="${item.id}" ${isTaken ? "disabled" : ""}>${isTaken ? "Vergeben" : "Ich nehme das"}</button>
+        ${isTaken ? `<a href="#" class="undo" data-id="${item.id}">rückgängig</a>` : ""}
+      </div>
     `;
     listEl.appendChild(li);
   });
 
   listEl.querySelectorAll("button:not(:disabled)").forEach(btn => {
-    btn.addEventListener("click", async () => {
+    btn.addEventListener("click", () => {
       btn.disabled = true;
       btn.classList.add("loading");
       btn.textContent = "Moment...";
-      try {
-        const result = await reservationsRef.child(btn.dataset.id).transaction(current => {
-          if (current) return;
-          return true;
-        });
-        if (!result.committed) {
-          btn.classList.remove("loading");
-          btn.disabled = true;
-          btn.textContent = "Vergeben";
-        }
-      } catch (e) {
+      reservationsRef.child(btn.dataset.id).transaction(current => {
+        if (current) return; // schon vergeben, abbrechen
+        return true;
+      }).catch(() => {
         btn.classList.remove("loading");
         btn.disabled = false;
         btn.textContent = "Ich nehme das";
         alert("Da ist etwas schiefgelaufen, bitte nochmal versuchen.");
-      }
+      });
+    });
+  });
+
+  listEl.querySelectorAll("a.undo").forEach(a => {
+    a.addEventListener("click", (e) => {
+      e.preventDefault();
+      reservationsRef.child(a.dataset.id).remove();
     });
   });
 }
 
 reservationsRef.on("value", snapshot => {
-  const reserved = snapshot.val() || {};
-  render(reserved);
-}, err => {
-  errorEl.style.display = "block";
-  console.error(err);
+  render(snapshot.val());
 });
 </script>
 </body>
